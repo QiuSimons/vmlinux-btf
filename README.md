@@ -58,23 +58,14 @@ sudo dnf install gcc binutils openssl-devel elfutils-libelf-devel \
 
 `pahole` is used to extract the detached BTF blob from the compiled `vmlinux`. This is the only tool required by this package that is **not** a standard OpenWrt build dependency.
 
-The OpenWrt build system will compile `dwarves` for the host automatically via `PKG_BUILD_DEPENDS:=dwarves/host`, but this requires its own dependencies to be present on the host first:
-
-| Tool | Purpose |
-|------|---------|
-| `libdw-dev` | DWARF parsing library (part of `elfutils`) |
-| `libelf-dev` | ELF parsing (usually already installed) |
-| `zlib1g-dev` | Compression support |
-| `cmake` | Build system for `dwarves` |
-
 Install on Debian/Ubuntu:
 ```bash
-sudo apt install cmake libdw-dev libelf-dev zlib1g-dev
+sudo apt install dwarves
 ```
 
 Install on Fedora/RHEL:
 ```bash
-sudo dnf install cmake elfutils-devel elfutils-libelf-devel zlib-devel
+sudo dnf install dwarves
 ```
 
 > **Note:** A host `pahole` version of **1.16 or newer** is required for `--btf_encode_detached` support. The version bundled with the OpenWrt `dwarves/host` feed satisfies this requirement. If you install `pahole` manually from your system package manager, verify the version with `pahole --version`.
