@@ -1,0 +1,135 @@
+#
+# Copyright (C) 2015-2024 OpenWrt.org
+#
+# This is free software, licensed under the GNU General Public License v3.
+#
+
+include $(TOPDIR)/rules.mk
+include $(INCLUDE_DIR)/kernel.mk
+
+PKG_NAME:=vmlinux-btf
+PKG_VERSION:=$(LINUX_VERSION)
+PKG_RELEASE:=4
+
+PKG_SOURCE:=linux-$(LINUX_VERSION).tar.xz
+PKG_SOURCE_URL:=$(LINUX_SITE)
+PKG_HASH:=skip
+
+include $(INCLUDE_DIR)/package.mk
+
+PKG_BUILD_PARALLEL:=1
+
+define Package/vmlinux-btf
+  SECTION:=kernel
+  CATEGORY:=Kernel
+  TITLE:=Kernel vmlinux.btf for CO-RE compatibility
+endef
+
+define Package/vmlinux-btf/description
+  Supplies kernel BTF information to ensure CO-RE eBPF compatibility.
+  This package downloads a clean kernel source, applies architecture patches,
+  and generates BTF information locally via a shadow build without tainting
+  the main kernel tree.
+endef
+
+define Package/vmlinux-btf/postinst
+#!/bin/sh
+if [ -z "$${IPKG_INSTROOT}" ]; then
+	ln -sf /usr/lib/debug/boot/vmlinux /usr/lib/debug/boot/vmlinux-$$(uname -r)
+fi
+endef
+
+define Package/vmlinux-btf/prerm
+#!/bin/sh
+if [ -z "$${IPKG_INSTROOT}" ]; then
+	rm -f /usr/lib/debug/boot/vmlinux-$$(uname -r)
+fi
+endef
+
+PLATFORM_PATCH_DIR := $(PLATFORM_DIR)/patches$(if $(wildcard $(PLATFORM_DIR)/patches-$(KERNEL_PATCHVER)),-$(KERNEL_PATCHVER))
+SUBTARGET_PATCH_DIR := $(PLATFORM_SUBDIR)/patches$(if $(wildcard $(PLATFORM_SUBDIR)/patches-$(KERNEL_PATCHVER)),-$(KERNEL_PATCHVER))
+
+PLATFORM_FILES_DIR := $(foreach dir,$(wildcard $(PLATFORM_DIR)/files $(PLATFORM_DIR)/files-$(KERNEL_PATCHVER)),$(dir))
+SUBTARGET_FILES_DIR := $(foreach dir,$(wildcard $(PLATFORM_SUBDIR)/files $(PLATFORM_SUBDIR)/files-$(KERNEL_PATCHVER)),$(dir))
+
+define Build/Prepare
+	mkdir -p $(PKG_BUILD_DIR)
+	xzcat $(DL_DIR)/linux-$(LINUX_VERSION).tar.xz | tar -C $(PKG_BUILD_DIR) -xf -
+	mv $(PKG_BUILD_DIR)/linux-$(LINUX_VERSION) $(PKG_BUILD_DIR)/shadow-kernel
+	
+	[ ! -d "$(GENERIC_FILES_DIR)" ] || $(CP) $(GENERIC_FILES_DIR)/. $(PKG_BUILD_DIR)/shadow-kernel/
+	$(foreach dir,$(PLATFORM_FILES_DIR), [ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
+	$(foreach dir,$(SUBTARGET_FILES_DIR), [ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
+	
+	$(if $(wildcard $(GENERIC_BACKPORT_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_BACKPORT_DIR),generic-backport/))
+	$(if $(wildcard $(GENERIC_PATCH_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_PATCH_DIR),generic-pending/))
+	$(if $(wildcard $(GENERIC_HACK_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_HACK_DIR),generic-hack/))
+	$(if $(wildcard $(PLATFORM_PATCH_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(PLATFORM_PATCH_DIR),platform/))
+	$(if $(wildcard $(SUBTARGET_PATCH_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(SUBTARGET_PATCH_DIR),platform-subtarget/))
+	
+	cp $(LINUX_DIR)/.config $(PKG_BUILD_DIR)/shadow-kernel/.config
+endef
+
+
+define Build/Compile
+	$(MAKE) -C $(PKG_BUILD_DIR)/shadow-kernel \
+		$(KERNEL_MAKE_FLAGS) \
+		KBUILD_HOSTLDFLAGS="$(KBUILD_HOSTLDFLAGS) -lz" \
+		olddefconfig
+
+	$(PKG_BUILD_DIR)/shadow-kernel/scripts/config --file $(PKG_BUILD_DIR)/shadow-kernel/.config \
+		--disable DEBUG_INFO_NONE \
+		--disable DEBUG_INFO_SPLIT \
+		--disable DEBUG_INFO_REDUCED \
+		--enable DEBUG_KERNEL \
+		--enable DEBUG_INFO \
+		--enable DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT \
+		--enable DEBUG_INFO_BTF \
+		--enable DEBUG_INFO_BTF_KFUNC \
+		--enable BPF \
+		--enable BPF_SYSCALL \
+		--enable BPF_JIT \
+		--enable BPF_JIT_ALWAYS_ON \
+		--enable BPF_JIT_DEFAULT_ON \
+		--enable HAVE_EBPF_JIT \
+		--enable KPROBES \
+		--enable KPROBE_EVENTS \
+		--enable BPF_EVENTS \
+		--enable PERF_EVENTS \
+		--enable TRACEPOINTS \
+		--enable KALLSYMS \
+		--enable CGROUPS \
+		--enable CGROUP_BPF \
+		--enable NET_INGRESS \
+		--enable NET_EGRESS \
+		--enable NET_SCH_INGRESS \
+		--enable NET_CLS_BPF \
+		--enable NET_CLS_ACT \
+		--enable NET_ACT_BPF \
+		--enable BPF_STREAM_PARSER \
+		--enable XDP_SOCKETS \
+		--enable MACVLAN
+
+	$(MAKE) -C $(PKG_BUILD_DIR)/shadow-kernel \
+		$(KERNEL_MAKE_FLAGS) \
+		KBUILD_HOSTLDFLAGS="$(KBUILD_HOSTLDFLAGS) -lz" \
+		olddefconfig prepare scripts
+
+	$(MAKE) -C $(PKG_BUILD_DIR)/shadow-kernel \
+		$(KERNEL_MAKE_FLAGS) \
+		KBUILD_HOSTLDFLAGS="$(KBUILD_HOSTLDFLAGS) -lz" \
+		$(PKG_JOBS) vmlinux
+
+	pahole --btf_encode_detached=$(PKG_BUILD_DIR)/vmlinux-btf $(PKG_BUILD_DIR)/shadow-kernel/vmlinux
+endef
+
+define Build/Clean
+	rm -rf $(PKG_BUILD_DIR)
+endef
+
+define Package/vmlinux-btf/install
+	$(INSTALL_DIR) $(1)/usr/lib/debug/boot
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/vmlinux-btf $(1)/usr/lib/debug/boot/vmlinux
+endef
+
+$(eval $(call BuildPackage,vmlinux-btf))
