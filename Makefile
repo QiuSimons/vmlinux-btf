@@ -9,7 +9,7 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=vmlinux-btf
 PKG_VERSION:=$(LINUX_VERSION)
-PKG_RELEASE:=4
+PKG_RELEASE:=5
 
 PKG_SOURCE:=linux-$(LINUX_VERSION).tar.xz
 PKG_SOURCE_URL:=$(LINUX_SITE)
@@ -56,17 +56,17 @@ define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	xzcat $(DL_DIR)/linux-$(LINUX_VERSION).tar.xz | tar -C $(PKG_BUILD_DIR) -xf -
 	mv $(PKG_BUILD_DIR)/linux-$(LINUX_VERSION) $(PKG_BUILD_DIR)/shadow-kernel
-	
+
 	[ ! -d "$(GENERIC_FILES_DIR)" ] || $(CP) $(GENERIC_FILES_DIR)/. $(PKG_BUILD_DIR)/shadow-kernel/
 	$(foreach dir,$(PLATFORM_FILES_DIR), [ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
 	$(foreach dir,$(SUBTARGET_FILES_DIR), [ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
-	
+
 	$(if $(wildcard $(GENERIC_BACKPORT_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_BACKPORT_DIR),generic-backport/))
 	$(if $(wildcard $(GENERIC_PATCH_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_PATCH_DIR),generic-pending/))
 	$(if $(wildcard $(GENERIC_HACK_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_HACK_DIR),generic-hack/))
 	$(if $(wildcard $(PLATFORM_PATCH_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(PLATFORM_PATCH_DIR),platform/))
 	$(if $(wildcard $(SUBTARGET_PATCH_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(SUBTARGET_PATCH_DIR),platform-subtarget/))
-	
+
 	cp $(LINUX_DIR)/.config $(PKG_BUILD_DIR)/shadow-kernel/.config
 endef
 
@@ -78,47 +78,73 @@ define Build/Compile
 		olddefconfig
 
 	$(PKG_BUILD_DIR)/shadow-kernel/scripts/config --file $(PKG_BUILD_DIR)/shadow-kernel/.config \
-		--disable DEBUG_INFO_NONE \
-		--disable DEBUG_INFO_SPLIT \
-		--disable DEBUG_INFO_REDUCED \
+		--disable WERROR \
+		--enable KALLSYMS \
+		--enable PERF_EVENTS \
+		--enable TRACEPOINTS \
 		--enable DEBUG_KERNEL \
+		--disable DEBUG_INFO_NONE \
+		--disable DEBUG_INFO_REDUCED \
+		--disable DEBUG_INFO_SPLIT \
 		--enable DEBUG_INFO \
 		--enable DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT \
 		--enable DEBUG_INFO_BTF \
 		--enable DEBUG_INFO_BTF_KFUNC \
+		--enable PAHOLE_HAS_LANG_EXCLUDE \
 		--enable BPF \
 		--enable BPF_SYSCALL \
 		--enable BPF_JIT \
-		--enable BPF_JIT_ALWAYS_ON \
 		--enable BPF_JIT_DEFAULT_ON \
-		--enable HAVE_EBPF_JIT \
+		--enable BPF_JIT_ALWAYS_ON \
+		--enable BPF_STREAM_PARSER \
+		--enable FTRACE \
 		--enable KPROBES \
+		--enable KRETPROBES \
 		--enable KPROBE_EVENTS \
+		--enable UPROBES \
+		--enable UPROBE_EVENTS \
 		--enable BPF_EVENTS \
-		--enable PERF_EVENTS \
-		--enable TRACEPOINTS \
-		--enable KALLSYMS \
 		--enable CGROUPS \
 		--enable CGROUP_BPF \
+		--enable CGROUP_NET_CLASSID \
+		--enable CGROUP_NET_PRIO \
+		--enable NET_NS \
+		--enable NET_SCHED \
 		--enable NET_INGRESS \
 		--enable NET_EGRESS \
 		--enable NET_SCH_INGRESS \
-		--enable NET_CLS_BPF \
+		--enable NET_SCH_FIFO \
+		--enable NET_SCH_HTB \
+		--enable NET_SCH_TBF \
+		--enable NET_SCH_FQ \
+		--enable NET_SCH_FQ_CODEL \
+		--enable NET_SCH_CAKE \
+		--enable NET_CLS \
 		--enable NET_CLS_ACT \
+		--enable NET_CLS_U32 \
+		--enable NET_CLS_FLOWER \
+		--enable NET_CLS_BPF \
+		--enable NET_ACT_GACT \
+		--enable NET_ACT_MIRRED \
+		--enable NET_ACT_POLICE \
 		--enable NET_ACT_BPF \
-		--enable BPF_STREAM_PARSER \
+		--enable MACVLAN \
 		--enable XDP_SOCKETS \
-		--enable MACVLAN
+		--enable XDP_SOCKETS_DIAG \
+		--set-str EXTRA_FIRMWARE "" \
+		--set-str INITRAMFS_SOURCE ""
 
 	$(MAKE) -C $(PKG_BUILD_DIR)/shadow-kernel \
 		$(KERNEL_MAKE_FLAGS) \
+		$(PKG_JOBS) \
 		KBUILD_HOSTLDFLAGS="$(KBUILD_HOSTLDFLAGS) -lz" \
 		olddefconfig prepare scripts
 
 	$(MAKE) -C $(PKG_BUILD_DIR)/shadow-kernel \
 		$(KERNEL_MAKE_FLAGS) \
+		$(PKG_JOBS) \
 		KBUILD_HOSTLDFLAGS="$(KBUILD_HOSTLDFLAGS) -lz" \
-		$(PKG_JOBS) vmlinux
+		vmlinux
 
 	pahole --btf_encode_detached=$(PKG_BUILD_DIR)/vmlinux-btf $(PKG_BUILD_DIR)/shadow-kernel/vmlinux
 endef
@@ -130,6 +156,7 @@ endef
 define Package/vmlinux-btf/install
 	$(INSTALL_DIR) $(1)/usr/lib/debug/boot
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/vmlinux-btf $(1)/usr/lib/debug/boot/vmlinux
+	$(LN) vmlinux $(1)/usr/lib/debug/boot/vmlinux-$(LINUX_VERSION)
 endef
 
 $(eval $(call BuildPackage,vmlinux-btf))
