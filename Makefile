@@ -42,12 +42,6 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 fi
 endef
 
-PLATFORM_PATCH_DIR := $(PLATFORM_DIR)/patches$(if $(wildcard $(PLATFORM_DIR)/patches-$(KERNEL_PATCHVER)),-$(KERNEL_PATCHVER))
-SUBTARGET_PATCH_DIR := $(PLATFORM_SUBDIR)/patches$(if $(wildcard $(PLATFORM_SUBDIR)/patches-$(KERNEL_PATCHVER)),-$(KERNEL_PATCHVER))
-
-PLATFORM_FILES_DIR := $(foreach dir,$(wildcard $(PLATFORM_DIR)/files $(PLATFORM_DIR)/files-$(KERNEL_PATCHVER)),$(dir))
-SUBTARGET_FILES_DIR := $(foreach dir,$(wildcard $(PLATFORM_SUBDIR)/files $(PLATFORM_SUBDIR)/files-$(KERNEL_PATCHVER)),$(dir))
-
 PAHOLE_JOBS := $(if $(filter -j%,$(PKG_JOBS)),$(patsubst -j%,%,$(filter -j%,$(PKG_JOBS))),1)
 
 define Build/Prepare
@@ -55,16 +49,6 @@ define Build/Prepare
 
 	$(TAR) -C $(PKG_BUILD_DIR) -xf $(DL_DIR)/$(LINUX_SOURCE)
 	mv $(PKG_BUILD_DIR)/linux-$(LINUX_VERSION) $(PKG_BUILD_DIR)/shadow-kernel
-
-	[ ! -d "$(GENERIC_FILES_DIR)" ] || $(CP) $(GENERIC_FILES_DIR)/. $(PKG_BUILD_DIR)/shadow-kernel/
-	$(foreach dir,$(PLATFORM_FILES_DIR),[ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
-	$(foreach dir,$(SUBTARGET_FILES_DIR),[ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
-
-	$(if $(wildcard $(GENERIC_BACKPORT_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_BACKPORT_DIR),generic-backport/))
-	$(if $(wildcard $(GENERIC_PATCH_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_PATCH_DIR),generic-pending/))
-	$(if $(wildcard $(GENERIC_HACK_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_HACK_DIR),generic-hack/))
-	$(if $(wildcard $(PLATFORM_PATCH_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(PLATFORM_PATCH_DIR),platform/))
-	$(if $(wildcard $(SUBTARGET_PATCH_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(SUBTARGET_PATCH_DIR),platform-subtarget/))
 
 	cp $(LINUX_DIR)/.config $(PKG_BUILD_DIR)/shadow-kernel/.config
 endef
@@ -128,7 +112,7 @@ define Build/Compile
 	$(MAKE) -C $(PKG_BUILD_DIR)/shadow-kernel \
 		$(KERNEL_MAKE_FLAGS) \
 		$(PKG_JOBS) \
-		KBUILD_HOSTLDFLAGS="$(KBUILD_HOSTLDFLAGS) -lz" \
+		KBUILD_HOSTLDFLAGS="-L$(STAGING_DIR_HOST)/lib -lz" \
 		vmlinux
 
 	pahole \
