@@ -9,11 +9,7 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=vmlinux-btf
 PKG_VERSION:=$(LINUX_VERSION)
-PKG_RELEASE:=5
-
-PKG_SOURCE:=linux-$(LINUX_VERSION).tar.xz
-PKG_SOURCE_URL:=$(LINUX_SITE)
-PKG_HASH:=skip
+PKG_RELEASE:=6
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -27,9 +23,9 @@ endef
 
 define Package/vmlinux-btf/description
   Supplies kernel BTF information to ensure CO-RE eBPF compatibility.
-  This package downloads a clean kernel source, applies architecture patches,
-  and generates BTF information locally via a shadow build without tainting
-  the main kernel tree.
+  This package builds a shadow kernel tree using the OpenWrt kernel source,
+  applies the same patches/files, and generates detached BTF information
+  without modifying the main kernel build directory.
 endef
 
 define Package/vmlinux-btf/postinst
@@ -52,32 +48,30 @@ SUBTARGET_PATCH_DIR := $(PLATFORM_SUBDIR)/patches$(if $(wildcard $(PLATFORM_SUBD
 PLATFORM_FILES_DIR := $(foreach dir,$(wildcard $(PLATFORM_DIR)/files $(PLATFORM_DIR)/files-$(KERNEL_PATCHVER)),$(dir))
 SUBTARGET_FILES_DIR := $(foreach dir,$(wildcard $(PLATFORM_SUBDIR)/files $(PLATFORM_SUBDIR)/files-$(KERNEL_PATCHVER)),$(dir))
 
+PAHOLE_JOBS := $(if $(filter -j%,$(PKG_JOBS)),$(patsubst -j%,%,$(filter -j%,$(PKG_JOBS))),1)
+
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
-	xzcat $(DL_DIR)/linux-$(LINUX_VERSION).tar.xz | tar -C $(PKG_BUILD_DIR) -xf -
+
+	$(TAR) -C $(PKG_BUILD_DIR) -xf $(DL_DIR)/$(LINUX_SOURCE)
 	mv $(PKG_BUILD_DIR)/linux-$(LINUX_VERSION) $(PKG_BUILD_DIR)/shadow-kernel
 
 	[ ! -d "$(GENERIC_FILES_DIR)" ] || $(CP) $(GENERIC_FILES_DIR)/. $(PKG_BUILD_DIR)/shadow-kernel/
-	$(foreach dir,$(PLATFORM_FILES_DIR), [ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
-	$(foreach dir,$(SUBTARGET_FILES_DIR), [ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
+	$(foreach dir,$(PLATFORM_FILES_DIR),[ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
+	$(foreach dir,$(SUBTARGET_FILES_DIR),[ ! -d "$(dir)" ] || $(CP) $(dir)/. $(PKG_BUILD_DIR)/shadow-kernel/;)
 
-	$(if $(wildcard $(GENERIC_BACKPORT_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_BACKPORT_DIR),generic-backport/))
-	$(if $(wildcard $(GENERIC_PATCH_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_PATCH_DIR),generic-pending/))
-	$(if $(wildcard $(GENERIC_HACK_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_HACK_DIR),generic-hack/))
-	$(if $(wildcard $(PLATFORM_PATCH_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(PLATFORM_PATCH_DIR),platform/))
-	$(if $(wildcard $(SUBTARGET_PATCH_DIR)/*), $(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(SUBTARGET_PATCH_DIR),platform-subtarget/))
+	$(if $(wildcard $(GENERIC_BACKPORT_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_BACKPORT_DIR),generic-backport/))
+	$(if $(wildcard $(GENERIC_PATCH_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_PATCH_DIR),generic-pending/))
+	$(if $(wildcard $(GENERIC_HACK_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(GENERIC_HACK_DIR),generic-hack/))
+	$(if $(wildcard $(PLATFORM_PATCH_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(PLATFORM_PATCH_DIR),platform/))
+	$(if $(wildcard $(SUBTARGET_PATCH_DIR)/*),$(call PatchDir,$(PKG_BUILD_DIR)/shadow-kernel,$(SUBTARGET_PATCH_DIR),platform-subtarget/))
 
 	cp $(LINUX_DIR)/.config $(PKG_BUILD_DIR)/shadow-kernel/.config
 endef
 
-
 define Build/Compile
-	$(MAKE) -C $(PKG_BUILD_DIR)/shadow-kernel \
-		$(KERNEL_MAKE_FLAGS) \
-		KBUILD_HOSTLDFLAGS="$(KBUILD_HOSTLDFLAGS) -lz" \
-		olddefconfig
-
-	$(PKG_BUILD_DIR)/shadow-kernel/scripts/config --file $(PKG_BUILD_DIR)/shadow-kernel/.config \
+	$(PKG_BUILD_DIR)/shadow-kernel/scripts/config \
+		--file $(PKG_BUILD_DIR)/shadow-kernel/.config \
 		--disable WERROR \
 		--enable KALLSYMS \
 		--enable PERF_EVENTS \
@@ -104,11 +98,6 @@ define Build/Compile
 		--enable UPROBES \
 		--enable UPROBE_EVENTS \
 		--enable BPF_EVENTS \
-		--enable CGROUPS \
-		--enable CGROUP_BPF \
-		--enable CGROUP_NET_CLASSID \
-		--enable CGROUP_NET_PRIO \
-		--enable NET_NS \
 		--enable NET_SCHED \
 		--enable NET_INGRESS \
 		--enable NET_EGRESS \
@@ -136,9 +125,8 @@ define Build/Compile
 
 	$(MAKE) -C $(PKG_BUILD_DIR)/shadow-kernel \
 		$(KERNEL_MAKE_FLAGS) \
-		$(PKG_JOBS) \
 		KBUILD_HOSTLDFLAGS="$(KBUILD_HOSTLDFLAGS) -lz" \
-		olddefconfig prepare scripts
+		olddefconfig
 
 	$(MAKE) -C $(PKG_BUILD_DIR)/shadow-kernel \
 		$(KERNEL_MAKE_FLAGS) \
@@ -146,7 +134,10 @@ define Build/Compile
 		KBUILD_HOSTLDFLAGS="$(KBUILD_HOSTLDFLAGS) -lz" \
 		vmlinux
 
-	pahole --btf_encode_detached=$(PKG_BUILD_DIR)/vmlinux-btf $(PKG_BUILD_DIR)/shadow-kernel/vmlinux
+	pahole \
+		--jobs=$(PAHOLE_JOBS) \
+		--btf_encode_detached=$(PKG_BUILD_DIR)/vmlinux-btf \
+		$(PKG_BUILD_DIR)/shadow-kernel/vmlinux
 endef
 
 define Build/Clean
