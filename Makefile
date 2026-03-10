@@ -74,7 +74,6 @@ define Build/Compile
 		--file $(PKG_BUILD_DIR)/shadow-kernel/.config \
 		--disable WERROR \
 		--enable KALLSYMS \
-		--enable PERF_EVENTS \
 		--enable TRACEPOINTS \
 		--enable DEBUG_KERNEL \
 		--disable DEBUG_INFO_NONE \
@@ -95,8 +94,6 @@ define Build/Compile
 		--enable KPROBES \
 		--enable KRETPROBES \
 		--enable KPROBE_EVENTS \
-		--enable UPROBES \
-		--enable UPROBE_EVENTS \
 		--enable BPF_EVENTS \
 		--enable NET_SCHED \
 		--enable NET_INGRESS \
