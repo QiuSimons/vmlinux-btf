@@ -35,6 +35,7 @@ define Package/vmlinux-btf/prerm
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || rm -f /usr/lib/debug/boot/vmlinux-$$(uname -r)
 endef
+
 BTF_CC ?= $(if $(TARGET_CC_NOCACHE),$(TARGET_CC_NOCACHE),$(TARGET_CROSS)gcc)
 BTF_PAHOLE ?= $(firstword \
 	$(wildcard $(STAGING_DIR_HOST)/bin/pahole /usr/bin/pahole /usr/local/bin/pahole) \
