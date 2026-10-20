@@ -24,31 +24,14 @@ jobs:
     name: Prepare version and matrix
     runs-on: ubuntu-latest
     outputs:
-      release_tag: ${{ steps.meta.outputs.release_tag }}
-      release_name: ${{ steps.meta.outputs.release_name }}
+      release_tag: ${{ steps.matrix.outputs.release_tag }}
+      release_name: ${{ steps.matrix.outputs.release_name }}
       sdks: ${{ steps.matrix.outputs.sdks }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
 
-      - name: Generate version metadata
-        id: meta
-        shell: bash
-        run: |
-          pkg_release=$(grep '^PKG_RELEASE:=' Makefile | head -n 1 | cut -d= -f2 | tr -d '[:space:]')
-          date_tag=$(date +'%Y%m%d')
-          short_sha=$(git rev-parse --short HEAD)
-
-          release_tag="vmlinux-btf_r${pkg_release}_${date_tag}_${short_sha}"
-          release_name="vmlinux-btf r${pkg_release} (${date_tag})"
-
-          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
-          echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
-
-          echo "Release tag: ${release_tag}"
-          echo "Release name: ${release_name}"
-
-      - name: Resolve latest SDK releases
+      - name: Resolve latest SDK releases and metadata
         id: matrix
         shell: bash
         run: |
@@ -85,6 +68,22 @@ jobs:
           done
 
           echo "sdks=$(jq -nc --args '$ARGS.positional' -- "${sdks[@]}")" >> "$GITHUB_OUTPUT"
+
+          pkg_release=$(grep '^PKG_RELEASE:=' Makefile | head -n 1 | cut -d= -f2 | tr -d '[:space:]')
+          date_tag=$(date +'%Y%m%d')
+          short_sha=$(git rev-parse --short HEAD)
+
+          target_vers=$(IFS=, ; echo "${sdks[*]}")
+          target_vers_tag=$(IFS=_ ; echo "${sdks[*]}")
+
+          release_name="vmlinux-btf r${pkg_release} for OpenWrt ${target_vers} (${date_tag})"
+          release_tag="vmlinux-btf_r${pkg_release}_openwrt-${target_vers_tag}_${date_tag}_${short_sha}"
+
+          echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+          echo "Release name: ${release_name}"
+          echo "Release tag: ${release_tag}"
 
   build:
     name: Build ${{ matrix.arch }}-openwrt-${{ matrix.sdk }}
@@ -178,7 +177,7 @@ jobs:
         shell: bash
         run: |
           echo "=== Built package files ==="
-          find artifacts -type f | grep -E '\.(ipk|apk)$' || true
+          find artifacts -type f \( -name "vmlinux-btf*.ipk" -o -name "vmlinux-btf*.apk" \) || true
           echo "==========================="
 
       - name: Prepare renamed artifacts
@@ -201,7 +200,7 @@ jobs:
             fi
 
             cp "$f" "dist/${new_name}"
-          done < <(find artifacts -type f \( -name "*.ipk" -o -name "*.apk" \) 2>/dev/null)
+          done < <(find artifacts -type f \( -name "vmlinux-btf*.ipk" -o -name "vmlinux-btf*.apk" \) 2>/dev/null)
 
           if [ "$found" -eq 0 ]; then
             echo "::error::No package files found in artifacts"
